@@ -5,6 +5,27 @@ CPython API Design Guidelines
 This document is intended to be a set of guiding principles for development of the current CPython API. Future additions and enhancements to the CPython API should follow, or at least be influenced by, the principles described here. At a minimum, any new or modified APIs should be able to be categorised according to the terminology defined here, even if exceptions have to be made.
 
 
+# Informal Summary
+
+This section is included to efficiently provide an overview of the overall design. It is not the actual guidance, and the examples here may bear no relation to the specifics below.
+
+The CPython API is the full set of defined interfaces into CPython, including the Python language, all items in the standard library, all C APIs, file formats, bytecode, etc. Each of these come with different ideas of who should use them (for example, public or internal), how broadly they apply (for example, all Python runtimes or only CPython), when they may change (for example, stable or unstable), which should depend on which (for example, cross-module coupling), and when they may be used at all (for example, compiled-in or out).
+
+For the most part, there are existing definitions for these that are understood. However, the lack of formality around these definitions make it difficult to discuss edge cases, difficult to make decisions, and difficult for newcomers to learn how various aspects of CPython are designed and built.
+
+In this PEP, we create specific categories for the generality and coupling of the CPython API, and use these to define levels of accessibility, stability and availability. We use a metaphor of "rings" for generality (stability and accessibility) and "layers" for coupling (stability and availability).
+
+An API ring is the set of API elements that have the same level of generality. For example, all the functions considered to be part of the [PEP 384](https://www.python.org/dev/peps/pep-0384/) stable ABI are in the same ring. Users of the API will choose the ring they target, based on how generic they want their own code to be. The innermost ring is the most specific, while the outermost is the most generic. Opting-in to an inner ring allows the user to use API members from any ring outside of that one.
+
+An API layer is a convenience for managing coupling. In general, API elements in a given layer may depend upon each other and any in lower layers. (At the extreme, each API element could exist in its own layer and have extremely fine-grained allowances for using other layers, but this is impossible to manage.) Each layer provides some useful functionality without requiring layers above themselves - higher layers build upon lower layers to provide more useful functionality. For example, CPython's memory management APIs would be in the lowest layer, as all other parts of the API may use them, but they cannot access anything in a higher layer.
+
+Once API rings and layers are defined, we can specify additional characteristics for the API elements present in each. Each API ring will have accessibility indicated: how public or internal its elements should be considered. Each API ring and layer will have stability indicated: how frequently its elements may change shape or behavior. Finally, each API layer will indicate the implied availability of other layers, such that if one API layer is known to be present, the set of lower layers that are guaranteed to also be present is well defined.
+
+The end result should seem familiar to long-time contributors to CPython. This is intentional, as the current approach is not incorrect, but merely lacks robustness.
+
+And so with that overview, continue reading!
+
+
 # This document is NOT ...
 
 This document is NOT a design of a completely new API (though the design of a hypothetical new API should be guided by this document).
@@ -33,13 +54,13 @@ A common understanding of certain terms is necessary to talking about any API, a
 
 **Application**: A program that can be launched directly. Compare and contrast with *extension*. CPython is normally considered an application when used via the `python` or `python3` command.
 
-**Extension**: A program that cannot be launched directly but must be loaded by an application. Python modules, native or otherwise, are considered extenions. When embedded into another application, CPython is considered an extension.
+**Extension**: A program that cannot be launched directly but must be loaded by an application. Python modules, whether "native" code, bytecode or pure-Python, are considered extensions. When embedded into another application, CPython is considered an extension.
 
 **Target Runtime**: The combination of operating system and externally-provided code that an application is compiled to use. Referred to as "target runtime" to distinguish from "Python runtime". For CPython, the target runtime is usually the processor, operating system and C runtime implementation.
 
 **Native extension**: A subset of all extensions that are compiled to the same target runtime as the application they integrate with. CPython native extensions are compiled to native code that uses the CPython ABI. For contrast, Python source and bytecode files are *not* considered native extensions.
 
-**API**: Application Programming Interface. The set of interactions defined by an application to allow extensions to extend, control, and interact with the application. An API typically defines functions, classes and values as abstract interfaces. CPython has one API that applies for all scenarios in all contexts, though practical scenarios only use a subset of this API. (Referring to a subset of the API as "the <x> API" is generally acceptable.)
+**API**: Application Programming Interface. The set of interactions defined by an application to allow extensions to extend, control, and interact with the application. An API typically provides declarations of functions, values and namespaces as abstract interfaces. CPython has one API that applies for all scenarios in all contexts, though practical scenarios only use a subset of this API. (Referring to a subset of the API as "the <x> API" is generally acceptable.)
 
 **ABI**: Application Binary Interface. The implementation of an API such that its interactions can be realized by a digital computer. Typically includes memory layouts and binary representations, and is a function of the target platform and the build tools used to compile CPython. A particular build of CPython may have a different ABI (but identical API) to another build, which will impact compatibility with native extension builds but not sources.
 
@@ -58,13 +79,13 @@ These terms are introduced briefly here and described in much greater detail bel
 
 # Quick Overview
 
-For context as you continue reading, these are the API **rings** provided by CPython:
+For context as you continue reading, these are the API **rings** provided by CPython (from outermost to innermost):
 
 * Python ring (equivalent of the Python language)
 * CPython ring (CPython-specific APIs)
 * Internal ring (intended for internal use only)
 
-These are the API **layers** provided by CPython:
+These are the API **layers** provided by CPython (from higher layer to lowest layer):
 
 * Optional stdlib layer (dependencies that must be explicitly required)
 * Required stdlib layer (dependencies that can be assumed)
@@ -83,6 +104,7 @@ For context as you continue reading, these are half-sentence summaries of the st
 * CPython ring APIs change only at `x.y` version number changes
 * Internal ring APIs may change at any release
 
+**TODO: Layer API guarantees**
 
 ## Availability Guarantees Quick Overview
 
