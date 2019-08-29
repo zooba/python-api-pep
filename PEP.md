@@ -9,9 +9,9 @@ This document is intended to be a set of guiding principles for development of t
 
 This section is included to efficiently provide an overview of the overall design. It is not the actual guidance, and the examples here may bear no relation to the specifics below.
 
-The CPython API is the full set of defined interfaces into CPython, including the Python language, all items in the standard library, all C APIs, file formats, bytecode, etc. Each of these come with different ideas of who should use them (for example, public or internal), how broadly they apply (for example, all Python runtimes or only CPython), when they may change (for example, stable or unstable), which should depend on which (for example, cross-module coupling), and when they may be used at all (for example, compiled-in or out).
+The CPython API is the full set of defined contracts provided by CPython, including the Python language itself, all items in the standard library, all C APIs, file formats, bytecode, etc. Each API element's contract defines who may use it (for example, public or internal), how broadly it applies (for example, all Python runtimes or only CPython), when the contract may change (for example, stable or unstable), which API elements may depend on which (for example, cross-module coupling), and when they may be available (for example, compiled-in or out).
 
-For the most part, there are existing definitions for these that are understood. However, the lack of formality around these definitions make it difficult to discuss edge cases, difficult to make decisions, and difficult for newcomers to learn how various aspects of CPython are designed and built.
+For the most part, the existing contracts are well understood. Public versus internal. Abstract versus concrete. Platform-specific versus generic. However, the lack of formality around these definitions make it difficult to discuss edge cases, difficult to make decisions, and difficult for newcomers to learn how various aspects of CPython are designed and built.
 
 In this PEP, we create specific categories for the generality and coupling of the CPython API, and use these to define levels of accessibility, stability and availability. We use a metaphor of "rings" for generality (stability and accessibility) and "layers" for coupling (stability and availability).
 
@@ -21,7 +21,11 @@ An API layer is a convenience for managing coupling. In general, API elements in
 
 Once API rings and layers are defined, we can specify additional characteristics for the API elements present in each. Each API ring will have accessibility indicated: how public or internal its elements should be considered. Each API ring and layer will have stability indicated: how frequently its elements may change shape or behavior. Finally, each API layer will indicate the implied availability of other layers, such that if one API layer is known to be present, the set of lower layers that are guaranteed to also be present is well defined.
 
-The end result should seem familiar to long-time contributors to CPython. This is intentional, as the current approach is not incorrect, but merely lacks robustness.
+For example, we can make statements such as "sys._getframe is in the CPython API ring and the core layer" or "codecs.gb18030 is in the Python API ring and the optional stdlib layer". This shorthand, once the ring and layer definitions are understood, accurately specifies the implied contracts.
+
+More importantly, when adding a new API, specifying the ring and layer to which it belongs helps ensure good design. For example, a feature proposal with no APIs in the Python ring will not be consistent across Python runtimes, and new APIs in the core layer may not depend on `email.localtime` from the optional stdlib layer. With names and definitions, such design issues become easier to identify and fix.
+
+The end result is a set of definitions that should seem familiar to long-time contributors to CPython. This is intentional, as the prior approach is not incorrect, merely lacking robustness. As CPython becomes more consistent, efforts such as "tree shaking" (usused code removal) become more reliable.
 
 And so with that overview, continue reading!
 
@@ -45,6 +49,7 @@ This document is meant to be referenced in discussions (though preferably by con
 
 This document is supposed to cause arguments about how to classify existing API members (though with shared definitions it should be possible to reach agreement).
 
+
 # Definitions
 
 A common understanding of certain terms is necessary to talking about any API, and so this section defines the terms we use to discuss the CPython API. This section has two goals: to clarify existing common terminology, and to introduce new terminology. Terms are presented in a logical order, rather than alphabetically.
@@ -60,9 +65,11 @@ A common understanding of certain terms is necessary to talking about any API, a
 
 **Native extension**: A subset of all extensions that are compiled to the same target runtime as the application they integrate with. CPython native extensions are compiled to native code that uses the CPython ABI. For contrast, Python source and bytecode files are *not* considered native extensions.
 
-**API**: Application Programming Interface. The set of interactions defined by an application to allow extensions to extend, control, and interact with the application. An API typically provides declarations of functions, values and namespaces as abstract interfaces. CPython has one API that applies for all scenarios in all contexts, though practical scenarios only use a subset of this API. (Referring to a subset of the API as "the <x> API" is generally acceptable.)
+**API**: Application Programming Interface. The set of _contracts_ defined by an application to allow extensions to extend, control, and interact with the application. An API typically provides declarations of functions, values and namespaces as abstract interfaces. CPython has one API that applies for all scenarios in all contexts, though practical scenarios only use a subset of this API. (Referring to a subset of the API as "the <x> API" is generally acceptable.)
 
 **ABI**: Application Binary Interface. The implementation of an API such that its interactions can be realized by a digital computer. Typically includes memory layouts and binary representations, and is a function of the target platform and the build tools used to compile CPython. A particular build of CPython may have a different ABI (but identical API) to another build, which will impact compatibility with native extension builds but not sources.
+
+**Contracts**: Contracts specify the promises and expectations around normal use of an API. This includes argument and return types, side-effects, intended behaviour and exceptions. Stability and compatibility are normally understood in terms of the differences between contracts.
 
 **Stdlib**: Standard library. The set of components developed by the core team that build upon the Python language to provide building blocks and pre-written functionality.
 
@@ -75,21 +82,22 @@ These terms are introduced briefly here and described in much greater detail bel
 
 **API layers**: A way of dividing an API into subsets to specify interdependencies and coupling. Applications that embed CPython, and the CPython implementation itself, care about layers. Applications choose to adopt or implement a particular layer, which requires that all "lower" API layers must be made available, either by inclusion or implementation (imagine a building with foundations, where each layer of the building is only feasible because of the layers below it). Layers are orthogonal to rings.
 
-**API member**: One element of an API, such as a function, a class, or an accesible data value. Every user of an API will use it by accessing individual members. API members should belong to exactly one API ring and exactly one API layer.
+**API member**: One element of an API, such as a function, a class, or an accesible data value. Every user of an API will use it by accessing individual members. API members should belong to exactly one API ring and exactly one API layer. While each API member has its own contract, it is not a synonym because contracts may be implied for a range of APIs (for example, "an unusable type results in TypeError" does not have to be specified separately for each API member, though it is implicitly a contract of most APIs).
+
 
 # Quick Overview
 
 For context as you continue reading, these are the API **rings** provided by CPython (from outermost to innermost):
 
-* Python ring (equivalent of the Python language)
-* CPython ring (CPython-specific APIs)
+* Python ring (supported by all Python-compatible runtimes)
+* CPython ring (CPython-specific API contracts)
 * Internal ring (intended for internal use only)
 
 These are the API **layers** provided by CPython (from higher layer to lowest layer):
 
-* Optional stdlib layer (dependencies that must be explicitly required)
+* Optional stdlib layers (dependencies that must be explicitly required)
 * Required stdlib layer (dependencies that can be assumed)
-* Platform interaction layer (ability to interact with the platform and user)
+* Platform interaction layer (dependencies that interact with the platform and user)
 * Core layer ("pure" mode with no dependency on target runtime)
 * Platform adaption layer (isolates core layer from the target runtime)
 
@@ -98,13 +106,12 @@ These are the API **layers** provided by CPython (from higher layer to lowest la
 
 ## Stability Guarantees Quick Overview
 
-For context as you continue reading, these are half-sentence summaries of the stability guarantees made by CPython for each ring:
+For context as you continue reading, these are half-sentence summaries of the stability guarantees made by CPython for the contracts of each ring:
 
-* Python ring APIs change only at `x` version number changes
-* CPython ring APIs change only at `x.y` version number changes
-* Internal ring APIs may change at any release
+* Python ring API contracts only change at `x` version number changes
+* CPython ring API contracts only change at `x.y` version number changes
+* Internal ring API contracts may change at any release
 
-**TODO: Layer API guarantees**
 
 ## Availability Guarantees Quick Overview
 
@@ -121,7 +128,7 @@ For context as you continue reading, these are half-sentence summaries of the av
 
 Rings delineate a user-visible API into functional groups, becoming progressively more "private" as you approach the innermost ring. Users of the API will select a ring to target, and will then only access that part of the API available in that and outer rings. This enables the API developer to provide specific stability guarantees for each ring.
 
-Each member (function, data, etc.) that makes up part of the overall API should be defined as belonging to exactly one ring.
+Each API member (function, data, etc.) that makes up part of the overall API should be defined as belonging to exactly one ring.
 
 CPython provides three API rings, listed here from outermost to innermost:
 
@@ -189,7 +196,7 @@ As a rule, when "higher" layers are available, all "lower" layers are also avail
 
 CPython provides five API layers, listed here from top to bottom:
 
-* Optional stdlib layer
+* Optional stdlib layers
 * Required stdlib layer
 * Platform interaction layer
 * Core layer
@@ -199,22 +206,24 @@ An application embedding Python targets one layer and all those below it, which 
 
 Higher layers may depend on the APIs provided by lower layers, but not the other way around. In general, layers should aim to maximise interaction with the next layer down and avoid skipping it, but this is not a strict requirement.
 
+The optional stdlib layers are multiple sibling layers. Each one may or may not be present independently of the rest, and may have internal dependencies unlike the lower layers. For example, the optional `ftplib` module may require the presence of the optional `socket` module, but the reverse is not true. Optional stdlib layers may also depend directly on the target runtime, such as by directly using operating system functionality, while the required stdlib and core layers may not (and should use APIs provided by the two platform layers instead).
+
 The platform interaction layer is slightly different: it only interacts with the core layer. API elements in the other layers should use the interfaces provided by the core layer to access functionality of the target runtime. For example, the core layer provides the `open()` builtin, but defers the actual work to the platform interaction layer, which provides the resultant stream object.
 
-Elements belonging to the optional stdlib layer can take their own dependencies on the target runtime. For example, socket support can be provided by an optional module and does not need to exist in the platform interaction layer.
-
-Lower layers are required to maintain backwards compatibility more strictly than the layers above them.
+Lower layers are expected to change their contracts less frequently than the layers above them.
 
 Except for the optional stdlib layer, layers are "all or nothing". If any part is required, then the entire layer must be present.
 
 Standard Python distributions (that is, anything that may be launched with the `python` command) will depend upon most components in the Optional stdlib layer, and hence will require _everything_ from the Required stdlib layer and below. Only embedders and potentially deployment tools will use reduced layers.
 
-(Reminder: this document is not trying to be a reference for the current state of CPython, but as aspiration for a more organized architecture.)
+(Reminder: this document is not trying to be a reference for the current state of CPython, but as aspiration for a less-coupled architecture.)
 
 
 ## Platform adaptation layer
 
 This layer provides the CPython implementation of platform-specific adapters to support the core layer.
+
+Examples of the contents of the platform adaptation layer:
 
 * Memory allocation/deallocation
 * Thread local storage
@@ -230,7 +239,7 @@ The debug output is the equivalent of the temporary printer that CPython uses du
 
 This layer is the core language and evaluation engine. By adopting this layer and a suitable platform adaptation layer, an application can provide basic Python execution of code provided as in-memory strings.
 
-Examples of current components that fit into the core layer:
+Examples of the contents of the core layer:
 
 * Code compilation and interpreter loop
 * Abstract and concrete object interfaces (`PyObject_*()` methods, etc.)
@@ -249,7 +258,9 @@ Important but potentially non-obvious implications of relying only on the core l
 
 ## Platform interaction layer
 
-This layer provides most of what is today known as CPython (at least on supported platforms). By adopting this layer, Python can be used in ways that interact with the platform, including its user-facing and filesystem-facing mechanisms.
+This layer provides most of what is today known as CPython (at least on supported platforms) in the form of services that implement the contracts required by the core layer. These enable Python to be used in ways that interact with the platform, including user-facing and filesystem-facing mechanisms. Each target operating system will have a different implementation of the platform interaction layer.
+
+Examples of the contents of the platform interaction layer:
 
 * File system access
 * Standard input/output streams
@@ -269,6 +280,8 @@ Important but potentially non-obvious implications of the platform interaction l
 
 This layer provides common APIs for interactions between other modules. All components in the optional stdlib layer may assume that everything in this layer is present.
 
+Examples of the contents of the required stdlib layer:
+
 * standard ABCs
 * `importlib` package
 * `os` module
@@ -283,11 +296,13 @@ Important but potentially non-obvious implications of the required stdlib layer:
 * `importlib` implements a hook from the core layer (to provide the imported module), uses the platform interaction layer (via the `os` module), and may use text codecs provided by the optional stdlib layer (via the codec registry in this layer).
 
 
-## Optional stdlib layer
+## Optional stdlib layers
 
 This layer provides modules that fundamentally stand alone. None of the lower levels may depend on these components being present, and components in this layer should explicitly declare dependencies on others in the same layer.
 
-This layer is valuable for embedders and distributors that want to omit certain functionality. For example, omitting `socket` should be possible when that functionality is not required, as it is in the Optional stdlib layer, and omitting it should only affect those components in the optional stdlib layer that have explicitly required it.
+This layer is mostly valuable for embedders and distributors that want to omit certain functionality. For example, omitting `socket` should be possible when that functionality is not required, and omitting it should only affect those components in the optional stdlib layer that explicitly require it.
+
+Examples of the contents of the optional stdlib layers:
 
 * platform-independent algorithms (e.g. `itertools`, `statistics`)
 * application-specific functionality (e.g. `email`, `socket`, `ftplib`, `ssl`)
